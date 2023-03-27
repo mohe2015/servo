@@ -1,4 +1,4 @@
-name: Synchronize WPT Nightly
+name: WPT import
 
 on:
   schedule:
@@ -10,6 +10,8 @@ on:
 
 jobs:
   build-linux:
+    # This job is only useful when run on upstream servo.
+    if: github.repository == 'servo/servo' || github.event_name == 'workflow_dispatch'
     name: Build on Linux
     runs-on: ubuntu-20.04
     steps:
@@ -21,21 +23,30 @@ jobs:
           python3 -m pip install --upgrade pip virtualenv
           sudo apt update
           python3 ./mach bootstrap
-      - name: Release build
+      - name: Release build (Layout 2013)
         run: python3 ./mach build --release
       - name: Lockfile check
         run: ./etc/ci/lockfile_changed.sh
-      - name: Forbidden panic check
-        run: ./etc/ci/check_no_panic.sh
-      - name: Package binary
+      - name: Package binary (Layout 2013)
         run: tar -czf target.tar.gz target/release/servo resources
-      - name: Archive binary
+      - name: Archive binary (Layout 2013)
         uses: actions/upload-artifact@v3
         with:
-          name: release-binary
+          name: layout-2013-release-binary
+          path: target.tar.gz
+      - name: Release build (Layout 2020)
+        run: python3 ./mach build --release --with-layout-2020
+      - name: Package binary (Layout 2020)
+        run: tar -czf target.tar.gz target/release/servo resources
+      - name: Archive binary (Layout 2020)
+        uses: actions/upload-artifact@v3
+        with:
+          name: layout-2020-release-binary
           path: target.tar.gz
 
   linux-wpt:
+    # This job is only useful when run on upstream servo.
+    if: github.repository == 'servo/servo' || github.event_name == 'workflow_dispatch'
     name: Linux WPT Tests
     runs-on: ubuntu-20.04
     needs: ["build-linux"]
@@ -44,13 +55,14 @@ jobs:
     strategy:
       matrix:
         chunk_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        configuration: ["layout-2013", "layout-2020"]
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 2
       - uses: actions/download-artifact@v3
         with:
-          name: release-binary
+          name: ${{ matrix.configuration }}-release-binary
           path: release-binary
       - name: unPackage binary
         run: tar -xzf release-binary/target.tar.gz
@@ -70,20 +82,20 @@ jobs:
           python3 ./mach test-wpt \
             --release --processes $(nproc) --timeout-multiplier 2 \
             --total-chunks ${{ env.max_chunk_id }} --this-chunk ${{ matrix.chunk_id }} \
-            --log-raw test-wpt.${{ matrix.chunk_id }}.log \
-            --log-servojson wpt-jsonsummary.${{ matrix.chunk_id }}.log \
+            --log-raw test-wpt.${{ matrix.configuration }}.${{ matrix.chunk_id }}.log \
+            --log-servojson wpt-jsonsummary.${{ matrix.configuration }}.${{ matrix.chunk_id }}.log \
             --always-succeed
       - name: Archive logs
         uses: actions/upload-artifact@v3
         with:
-          name: wpt${{ matrix.chunk_id }}-logs-linux
+          name: wpt-logs-linux
           path: |
-            test-wpt.${{ matrix.chunk_id }}.log
-            wpt-jsonsummary.${{ matrix.chunk_id }}.log
-            filtered-wpt-summary.${{ matrix.chunk_id }}.log
-            intermittents.${{ matrix.chunk_id }}.log
+            test-wpt.${{ matrix.configuration }}.${{ matrix.chunk_id }}.log
+            wpt-jsonsummary.${{ matrix.configuration }}.${{ matrix.chunk_id }}.log
 
   sync:
+    # This job is only useful when run on upstream servo.
+    if: github.repository == 'servo/servo' || github.event_name == 'workflow_dispatch'
     name: Synchronize WPT Nightly
     runs-on: ubuntu-latest
     needs:
@@ -134,5 +146,6 @@ jobs:
           r? @servo-wpt-sync
           EOF
           )
-          # TODO: comment `@bors-servo r+` from `@servo-wpt-sync`
-          gh pr create --title "Sync WPT with upstream (${{ env.CURRENT_DATE }})" --body "$BODY" --head ${{ env.UPDATE_BRANCH }}
+          gh pr create \
+            --title "Sync WPT with upstream (${{ env.CURRENT_DATE }})" \
+            --body "$BODY" --head ${{ env.UPDATE_BRANCH }} | xargs gh pr comment $1 --body "@bors-servo r+"

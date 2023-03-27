@@ -3,6 +3,7 @@ name = "style_traits"
 version = "0.0.1"
 authors = ["The Servo Project Developers"]
 license = "MPL-2.0"
+edition = "2018"
 publish = false
 
 [lib]
@@ -17,11 +18,11 @@ gecko = []
 app_units = "0.7"
 bitflags = "1.0"
 cssparser = "0.29"
-euclid = "0.20"
+euclid = "0.22"
 lazy_static = "1"
 malloc_size_of = { path = "../malloc_size_of" }
 malloc_size_of_derive = "0.1"
-selectors = { path = "../selectors" }
+selectors = { path = "../selectors", features = ["shmem"] }
 serde = "1.0"
 servo_arc = { path = "../servo_arc" }
 servo_atoms = { path = "../atoms", optional = true }

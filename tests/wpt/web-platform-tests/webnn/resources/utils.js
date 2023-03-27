@@ -2,9 +2,6 @@
 
 const ExecutionArray = ['sync', 'async'];
 
-// https://webmachinelearning.github.io/webnn/#enumdef-mldevicetype
-const DeviceTypeArray = ['cpu', 'gpu'];
-
 // https://webmachinelearning.github.io/webnn/#enumdef-mloperandtype
 const TypedArrayDict = {
   float32: Float32Array,
@@ -68,7 +65,7 @@ const getExpectedDataAndType = (resources, outputName) => {
 };
 
 /**
- * Get ULP tolerance of conv2d operation.
+ * Get ULP tolerance of conv2d/convTranspose2d operation.
  * @param {Object} resources - Resources used for building a graph
  * @param {String} operationName - An operation name
  * @returns {Number} A tolerance number
@@ -81,7 +78,8 @@ const getConv2dPrecisionTolerance = (resources, operationName) => {
   const options = resources.options;
   let groups = 1;
   let inputChannels = inputShape[1]; // default nchw inputLayout
-  let filterWidth = filterShape[3]; // default oihw filterLayout
+  // default oihw filterLayout for conv2d or default iohw filterLayout for convTranspose2d
+  let filterWidth = filterShape[3];
   let filterHeight = filterShape[2];
   if (options) {
     if (options.groups) {
@@ -94,14 +92,20 @@ const getConv2dPrecisionTolerance = (resources, operationName) => {
       inputChannels = options.inputLayout === 'nchw' ? inputChannels : inputShape[3];
     }
     if (options.filterLayout) {
-      if (!['oihw', 'hwio', 'ohwi', 'ihwo'].includes(options.filterLayout)) {
+      let filterLayouts = ['oihw', 'hwio', 'ohwi', 'ihwo']; // default for conv2d
+      if (operationName === 'convTranspose2d') {
+        filterLayouts = ['iohw', 'hwoi', 'ohwi'];
+      }
+      if (!filterLayouts.includes(options.filterLayout)) {
         throw new Error(`Unsupported filterLayout ${options.filterLayout}`);
       }
       switch (options.filterLayout) {
         case 'oihw':
+        case 'iohw':
           // Just use the existing filterWidth and filterHeight above.
           break;
         case 'hwio':
+        case 'hwoi':
           filterWidth = filterShape[1];
           filterHeight = filterShape[0];
           break;
@@ -240,6 +244,7 @@ const PrecisionMetrics = {
   clamp: {ULP: {float32: 0, float16: 0}},
   concat: {ULP: {float32: 0, float16: 0}},
   conv2d: {ULP: {float32: getConv2dPrecisionTolerance, float16: getConv2dPrecisionTolerance}},
+  convTranspose2d: {ULP: {float32: getConv2dPrecisionTolerance, float16: getConv2dPrecisionTolerance}},
   // Begin Element-wise binary operations
   add: {ULP: {float32: 1, float16: 1}},
   sub: {ULP: {float32: 1, float16: 1}},
@@ -260,6 +265,7 @@ const PrecisionMetrics = {
   sin: {ATOL: {float32: 1/1024, float16: 1/512}},
   tan: {ATOL: {float32: 1/1024, float16: 1/512}},
   // End Element-wise unary operations
+  hardSwish: {ULP: {float32: 4, float16: 4}},
   gemm: {ULP: {float32: getGemmPrecisionTolerance, float16: getGemmPrecisionTolerance}},
   leakyRelu: {ULP: {float32: 1, float16: 1}},
   matmul: {ULP: {float32: getMatmulPrecisionTolerance, float16: getMatmulPrecisionTolerance}},
@@ -345,12 +351,17 @@ const assert_array_approx_equals_ulp = (actual, expected, nulp, dataType, descri
               `assert_array_approx_equals_ulp: ${description} lengths differ, expected ${expected.length} but got ${actual.length}`);
   let actualBitwise, expectedBitwise, distance;
   for (let i = 0; i < actual.length; i++) {
-    actualBitwise = getBitwise(actual[i], dataType);
-    expectedBitwise = getBitwise(expected[i], dataType);
-    distance = actualBitwise - expectedBitwise;
-    distance = distance >= 0 ? distance : -distance;
-    assert_true(distance <= nulp,
-                `assert_array_approx_equals_ulp: ${description} actual ${actual[i]} should be close enough to expected ${expected[i]} by the acceptable ${nulp} ULP distance, but they have ${distance} ULP distance`);
+    if (actual[i] === expected[i]) {
+      continue;
+    } else {
+      // measure the ULP distance
+      actualBitwise = getBitwise(actual[i], dataType);
+      expectedBitwise = getBitwise(expected[i], dataType);
+      distance = actualBitwise - expectedBitwise;
+      distance = distance >= 0 ? distance : -distance;
+      assert_true(distance <= nulp,
+                  `assert_array_approx_equals_ulp: ${description} actual ${actual[i]} should be close enough to expected ${expected[i]} by the acceptable ${nulp} ULP distance, but they have ${distance} ULP distance`);
+    }
   }
 };
 
@@ -445,8 +456,13 @@ const createMultiInputOperands = (builder, resources) => {
   let inputOperands = [];
   const inputOperandNameArray = Object.keys(resources.inputs);
   inputOperandNameArray.forEach(inputOperandName => {
-    const inputOperand = createSingleInputOperand(builder, resources, inputOperandName);
-    inputOperands.push(inputOperand);
+    let operand;
+    if (resources.inputs[inputOperandName].hasOwnProperty('constant') && resources.inputs[inputOperandName]['constant']) {
+      operand = createConstantOperand(builder, resources.inputs[inputOperandName]);
+    } else {
+      operand = createSingleInputOperand(builder, resources, inputOperandName);
+    }
+    inputOperands.push(operand);
   });
   return inputOperands;
 };
@@ -498,12 +514,16 @@ const buildGraph = (operationName, builder, resources, buildFunc) => {
   if (Array.isArray(resources.inputs)) {
     // the inputs of concat() is a sequence
     for (let subInput of resources.inputs) {
-      inputs[subInput.name] = new TypedArrayDict[subInput.type](subInput.data);
+      if (!subInput.hasOwnProperty('constant') || !subInput.constant) {
+        inputs[subInput.name] = new TypedArrayDict[subInput.type](subInput.data);
+      }
     }
   } else {
     for (let inputName in resources.inputs) {
       const subTestByName = resources.inputs[inputName];
-      inputs[inputName] = new TypedArrayDict[subTestByName.type](subTestByName.data);
+      if (!subTestByName.hasOwnProperty('constant') || !subTestByName.constant) {
+        inputs[inputName] = new TypedArrayDict[subTestByName.type](subTestByName.data);
+      }
     }
   }
   let outputs = {};
@@ -553,8 +573,8 @@ const run = async (operationName, context, builder, resources, buildFunc) => {
   // asynchronously compile the graph up to the output operand
   const graph = await builder.build(namedOutputOperands);
   // asynchronously execute the compiled graph
-  await context.compute(graph, inputs, outputs);
-  checkResults(operationName, namedOutputOperands, outputs, resources);
+  const result = await context.compute(graph, inputs, outputs);
+  checkResults(operationName, namedOutputOperands, result.outputs, resources);
 };
 
 /**
@@ -581,33 +601,29 @@ const testWebNNOperation = (operationName, buildFunc) => {
       // test sync
       operationNameArray.forEach((subOperationName) => {
         const tests = loadTests(subOperationName);
-        DeviceTypeArray.forEach(deviceType => {
-          setup(() => {
-            context = navigator.ml.createContextSync({deviceType});
-            builder = new MLGraphBuilder(context);
-          });
-          for (const subTest of tests) {
-            test(() => {
-              runSync(subOperationName, context, builder, subTest, buildFunc);
-            }, `${subTest.name} / ${deviceType} / ${executionType}`);
-          }
+        setup(() => {
+          context = navigator.ml.createContextSync();
+          builder = new MLGraphBuilder(context);
         });
+        for (const subTest of tests) {
+          test(() => {
+            runSync(subOperationName, context, builder, subTest, buildFunc);
+          }, `${subTest.name} / ${executionType}`);
+        }
       });
     } else {
       // test async
       operationNameArray.forEach((subOperationName) => {
         const tests = loadTests(subOperationName);
-        DeviceTypeArray.forEach(deviceType => {
-          promise_setup(async () => {
-            context = await navigator.ml.createContext({deviceType});
-            builder = new MLGraphBuilder(context);
-          });
-          for (const subTest of tests) {
-            promise_test(async () => {
-              await run(subOperationName, context, builder, subTest, buildFunc);
-            }, `${subTest.name} / ${deviceType} / ${executionType}`);
-          }
+        promise_setup(async () => {
+          context = await navigator.ml.createContext();
+          builder = new MLGraphBuilder(context);
         });
+        for (const subTest of tests) {
+          promise_test(async () => {
+            await run(subOperationName, context, builder, subTest, buildFunc);
+          }, `${subTest.name} / ${executionType}`);
+        }
       });
     }
   });

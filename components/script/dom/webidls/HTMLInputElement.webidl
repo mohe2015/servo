@@ -39,7 +39,7 @@ interface HTMLInputElement : HTMLElement {
            attribute boolean indeterminate;
   // [CEReactions]
   //          attribute DOMString inputMode;
-  readonly attribute HTMLElement? list;
+  readonly attribute HTMLDataListElement? list;
   [CEReactions]
            attribute DOMString max;
   [CEReactions, SetterThrows]
@@ -71,7 +71,7 @@ interface HTMLInputElement : HTMLElement {
   [CEReactions]
            attribute DOMString defaultValue;
   [CEReactions, SetterThrows]
-           attribute [TreatNullAs=EmptyString] DOMString value;
+           attribute [LegacyNullToEmptyString] DOMString value;
   [SetterThrows]
            attribute object? valueAsDate;
   [SetterThrows]

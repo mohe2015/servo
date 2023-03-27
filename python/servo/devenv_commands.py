@@ -178,6 +178,54 @@ class MachCommands(CommandBase):
         self.ensure_bootstrapped()
         return self.call_rustup_run(["rustc"] + params, env=self.build_env())
 
+    @Command('cargo-fix',
+             description='Run "cargo fix"',
+             category='devenv')
+    @CommandArgument(
+        'params', default=None, nargs='...',
+        help="Command-line arguments to be passed through to cargo-fix")
+    @CommandBase.build_like_command_arguments
+    def cargo_fix(self, params, features=[], media_stack=None, target=None,
+                  android=False, magicleap=False, **kwargs):
+        if not params:
+            params = []
+
+        features = features or []
+
+        target, android = self.pick_target_triple(target, android, magicleap)
+
+        features += self.pick_media_stack(media_stack, target)
+
+        self.ensure_bootstrapped(target=target)
+        self.ensure_clobbered()
+        env = self.build_env()
+
+        return self.run_cargo_build_like_command("fix", params, env=env, features=features, **kwargs)
+
+    @Command('cargo-clippy',
+             description='Run "cargo clippy"',
+             category='devenv')
+    @CommandArgument(
+        'params', default=None, nargs='...',
+        help="Command-line arguments to be passed through to cargo-clippy")
+    @CommandBase.build_like_command_arguments
+    def cargo_clippy(self, params, features=[], media_stack=None, target=None,
+                     android=False, magicleap=False, **kwargs):
+        if not params:
+            params = []
+
+        features = features or []
+
+        target, android = self.pick_target_triple(target, android, magicleap)
+
+        features += self.pick_media_stack(media_stack, target)
+
+        self.ensure_bootstrapped(target=target)
+        self.ensure_clobbered()
+        env = self.build_env()
+
+        return self.run_cargo_build_like_command("clippy", params, env=env, features=features, **kwargs)
+
     @Command('grep',
              description='`git grep` for selected directories.',
              category='devenv')
@@ -301,3 +349,41 @@ class MachCommands(CommandBase):
             "--verbose",
         ], env=env)
         return p.wait()
+
+    @Command('try',
+             description='Runs try jobs by force pushing to personal fork try branches',
+             category='devenv')
+    @CommandArgument(
+        'jobs', default=["try"], nargs='...',
+        help="Name(s) of job(s) (ex: try, linux, mac, windows, wpt)")
+    def try_jobs(self, jobs):
+        branches = []
+        # we validate branches because force pushing is destructive
+        VALID_TRY_BRACHES = ["try", "try-linux", "try-mac", "try-windows", "try-wpt"]
+        for job in jobs:
+            # branches must start with try-
+            if "try" not in job:
+                job = "try-" + job
+            if job not in VALID_TRY_BRACHES:
+                print(job + " job doesn't exist")
+                return -1
+            branches.append(job)
+        remote = "origin"
+        if "servo/servo" in subprocess.check_output(["git", "config", "--get", "remote.origin.url"]).decode():
+            # if we have servo/servo for origin check try remote
+            try:
+                if "servo/servo" in subprocess.check_output(["git", "config", "--get", "remote.try.url"]).decode():
+                    # User has servo/servo for try remote
+                    print("You should not use servo/servo for try remote!")
+                    return -1
+                else:
+                    remote = "try"
+            except subprocess.CalledProcessError:
+                print("It looks like you are patching in upstream servo.")
+                print("Set try remote to your personal fork with `git remote add try https://github.com/user/servo`")
+                return -1
+        for b in branches:
+            res = call(["git", "push", remote, "--force", f"HEAD:{b}"], env=self.build_env())
+            if res != 0:
+                return res
+        return 0

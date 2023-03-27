@@ -1233,11 +1233,8 @@ impl LayoutThread {
                         flags,
                     );
 
-                    rw_data.nodes_from_point_response = results
-                        .items
-                        .iter()
-                        .map(|item| UntrustedNodeAddress(item.tag.0 as *const c_void))
-                        .collect()
+                    rw_data.nodes_from_point_response =
+                        results.iter().map(|result| result.node).collect()
                 },
                 &QueryMsg::ElementInnerTextQuery(node) => {
                     let node = unsafe { ServoLayoutNode::new(&node) };
@@ -1345,8 +1342,12 @@ impl LayoutThread {
             self.viewport_size.width.to_f32_px(),
             self.viewport_size.height.to_f32_px(),
         ));
-        self.webrender_api
-            .send_display_list(epoch, viewport_size, display_list.wr.finalize());
+        self.webrender_api.send_display_list(
+            epoch,
+            viewport_size,
+            display_list.compositor_info,
+            display_list.wr.finalize(),
+        );
 
         if self.trace_layout {
             layout_debug::end_trace(self.generation.get());

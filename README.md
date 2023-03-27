@@ -1,7 +1,5 @@
 # The Servo Parallel Browser Engine Project
 
-[![Linux Build Status](https://img.shields.io/travis/servo/servo/master.svg?label=Linux%20build)](https://travis-ci.com/servo/servo)  [![Changelog #228](https://img.shields.io/badge/changelog-%23228-9E978E.svg)](https://changelog.com/podcast/228)
-
 Servo is a prototype web browser engine written in the
 [Rust](https://github.com/rust-lang/rust) language. It is currently developed on
 64-bit macOS, 64-bit Linux, 64-bit Windows, and Android.
@@ -95,26 +93,12 @@ If you get an undefined symbol error on `gst_player_get_config` try removing `gi
 
 #### On Fedora
 
-```sh
-sudo dnf install python3.7 python3-devel
+``` sh
+sudo dnf install python3 python3-virtualenv python3-pip python3-devel
+python3 ./mach bootstrap
 ```
 
-Installing pip 3.7 alongside Python 3.7 is vital. You might run into issues with virtualenv
-when trying to use Mach tools. You can install pip3.7 alongside virtualenv by executing:
-
-```sh
-curl https://bootstrap.pypa.io/get-pip.py | sudo -H python3.7
-python3.7 -m pip install virtualenv
-```
-
-Fedora 37 aliases python3.11 as `python3` by default. For this reason, when running Mach tools, make sure you
-execeute them with Python 3.7:
-
-```py
-python3.7 ./mach run https://servo.org/
-```
-
-If `python3.7 ./mach bootstrap` doesn't work, file a bug, and run the commands below:
+If `python3 ./mach bootstrap` doesn't work, file a bug, and, run the commands below:
 
 ``` sh
 sudo dnf install curl libtool gcc-c++ libXi-devel libunwind-devel \
@@ -126,7 +110,6 @@ sudo dnf install curl libtool gcc-c++ libXi-devel libunwind-devel \
     gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel autoconf213 \
     libjpeg-turbo-devel zlib libjpeg
 ```
-
 
 #### On CentOS
 
